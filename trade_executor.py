@@ -77,17 +77,19 @@ class TradeExecutor:
         Returns:
             dict: Response from the trade execution.
         """
-        self.mock_mode = False
+        #self.mock_mode = False
         #trade_signal ="SELL"
         if self.mock_mode:
-            logging.info(f"Mock {trade_signal} order: {quantity} {symbol} at price {price}")
-            return {
-                "status": "MOCK_SUCCESS",
+            logging.info(f"Simulated {trade_signal} order: {quantity} {symbol} at price {price}")
+            simulated_order = {
+                "status": "SIMULATED",
                 "trade_signal": trade_signal,
                 "symbol": symbol,
                 "quantity": quantity,
-                "price": price
+                "price": price,
+                "timestamp": datetime.now().isoformat()
             }
+            return simulated_order
 
         try:
             if price:

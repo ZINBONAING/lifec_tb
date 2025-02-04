@@ -6,7 +6,8 @@ releaseme.py
 config.json
 tradebot.log
 lifec_tb.code-workspace
-
+skeleton_main2.py
+skeleton_main_org.py
 # Additionally, if you want to ignore these directories anywhere
 release/
 __pycache__/
