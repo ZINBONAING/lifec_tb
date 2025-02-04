@@ -7,7 +7,7 @@ import pandas as pd
 # Import modules from your repository
 from data_handler import DataHandler          # :contentReference[oaicite:0]{index=0}
 from trade_executor import TradeExecutor
-from SignalManager4 import SignalManager        # Assumes this module has methods for indicator calculation
+from SignalManager4 import SignalManager        # :contentReference[oaicite:1]{index=1}
 
 def combine_signals(signal_15m, signal_1h):
     """
@@ -19,10 +19,23 @@ def combine_signals(signal_15m, signal_1h):
         return signal_15m
     return "HOLD"
 
+def parse_symbol(symbol):
+    """
+    Parse the symbol to determine the base coin and quote coin.
+    This function assumes a typical structure like BTCUSDT.
+    """
+    if symbol.endswith("USDT"):
+        base = symbol[:-4]
+        quote = "USDT"
+    else:
+        # Fallback: assume first three letters are the base coin.
+        base = symbol[:3]
+        quote = symbol[3:]
+    return base, quote
+
 def simulate_trading(args):
     # Initial parameters from command-line inputs.
-    initial_balance = args.initial_usdt
-    balance = initial_balance
+    initial_usdt = args.initial_usdt
     symbol = args.pair
     days = args.days
 
@@ -42,7 +55,7 @@ def simulate_trading(args):
         print("Insufficient historical data for simulation.")
         return
 
-    # For both dataframes, use the 'close_time' as a timestamp.
+    # Use 'close_time' as timestamp and sort the DataFrames.
     df_15m['timestamp'] = df_15m['close_time']
     df_1h['timestamp'] = df_1h['close_time']
     df_15m.sort_values(by="timestamp", inplace=True)
@@ -51,7 +64,7 @@ def simulate_trading(args):
     # Initialize SignalManager.
     signal_manager = SignalManager()
 
-    # Compute indicators and signals for 15m data.
+    # Compute MACD and trade signals for 15m data.
     macd_15m, signal_line_15m = signal_manager.calculate_macd(df_15m)
     df_15m['macd'] = macd_15m
     df_15m['signal_line'] = signal_line_15m
@@ -59,7 +72,7 @@ def simulate_trading(args):
         lambda row: "BUY" if row['macd'] > row['signal_line'] else "SELL", axis=1
     )
 
-    # Compute indicators and signals for 1h data.
+    # Compute MACD and trade signals for 1h data.
     macd_1h, signal_line_1h = signal_manager.calculate_macd(df_1h)
     df_1h['macd'] = macd_1h
     df_1h['signal_line'] = signal_line_1h
@@ -67,85 +80,138 @@ def simulate_trading(args):
         lambda row: "BUY" if row['macd'] > row['signal_line'] else "SELL", axis=1
     )
 
-    # Prepare a CSV file to log trades.
+    # Parse symbol to get base coin and quote coin.
+    base_coin, quote_coin = parse_symbol(symbol)
+
+    # Initialize positions: start with the initial USDT balance and no base coin.
+    usdt_balance = initial_usdt
+    base_balance = 0.0
+
+    # Prepare the CSV file for logging trades.
     csv_file = "trades_log.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([
-            "timestamp", "signal_15m", "signal_1h", "combined_signal",
-            "symbol", "quantity", "price", "order_type", "balance"
+            "timestamp", 
+            "macd_15m", "signal_line_15m", "trade_signal_15m",
+            "macd_1h", "signal_line_1h", "trade_signal_1h",
+            "combined_signal", "symbol", "trade_quantity", "price", "order_type",
+            "USDT_balance", f"{base_coin}_balance", "trade_executed"
         ])
 
-    trades = []  # List for storing trade details for summary
+    trades = []  # For storing trade details for summary reporting
 
-    # Loop over each 15m candle (this acts as our live trading heartbeat).
+    # Loop over each 15m candle (serving as the trading heartbeat).
     for idx, row in df_15m.iterrows():
         current_time = row['timestamp']
-        signal_15m = row['trade_signal']
+        trade_signal_15m = row['trade_signal']
+        macd_value_15m = row['macd']
+        signal_value_15m = row['signal_line']
 
-        # Find the most recent 1h candle (its timestamp should be <= current 15m time).
+        # Locate the most recent 1h candle (timestamp <= current 15m candle).
         df_1h_subset = df_1h[df_1h['timestamp'] <= current_time]
         if df_1h_subset.empty:
             continue  # Skip if no 1h data is available yet.
         row_1h = df_1h_subset.iloc[-1]
-        signal_1h = row_1h['trade_signal']
+        trade_signal_1h = row_1h['trade_signal']
+        macd_value_1h = row_1h['macd']
+        signal_value_1h = row_1h['signal_line']
 
         # Combine the signals from both timeframes.
-        combined_signal = combine_signals(signal_15m, signal_1h)
+        combined_signal = combine_signals(trade_signal_15m, trade_signal_1h)
+        
+        # Initialize flag for whether a trade is executed.
+        trade_executed = "No"
+        trade_quantity = 0.0  # Will be determined if a trade occurs.
+        
+        # If combined signal is HOLD, do not trade.
         if combined_signal == "HOLD":
-            continue  # No trade if signals do not agree.
+            # Log the data point with no trade execution.
+            with open(csv_file, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    current_time,
+                    macd_value_15m, signal_value_15m, trade_signal_15m,
+                    macd_value_1h, signal_value_1h, trade_signal_1h,
+                    combined_signal, symbol, 0.0, row['close'], "N/A",
+                    usdt_balance, base_balance, trade_executed
+                ])
+            continue
 
-        # For demonstration, use a fixed trade quantity.
-        trade_quantity = 1
+        # Use the closing price from the 15m candle.
         trade_price = float(row['close'])
         order_type = "LIMIT" if trade_price else "MARKET"
 
-        # Execute the trade using the unified logic (in mock mode).
-        trade_result = executor.execute_trade(combined_signal, symbol, trade_quantity, price=trade_price)
-        trade_timestamp = current_time
+        # Calculate the current portfolio value.
+        portfolio_value = usdt_balance + (base_balance * trade_price)
 
-        # Update simulated balance (a simplistic calculation).
+        # Check balances and decide trade quantity based on 99% usage of available funds.
         if combined_signal == "BUY":
-            balance -= trade_quantity * trade_price
-        elif combined_signal == "SELL":
-            balance += trade_quantity * trade_price
+            # Ensure USDT balance is at least 10% of portfolio value.
+            if usdt_balance < 0.1 * portfolio_value:
+                logging.info(f"Skipping BUY at {current_time}: insufficient USDT (Needed >= 10% of portfolio, Available: {usdt_balance}, Portfolio: {portfolio_value})")
+            else:
+                # Use 99% of the USDT balance.
+                trade_quantity = (0.99 * usdt_balance) / trade_price
+                trade_executed = "Yes"
+                # Execute the trade (simulated).
+                executor.execute_trade(combined_signal, symbol, trade_quantity, price=trade_price)
+                # Update balances.
+                usdt_balance -= trade_quantity * trade_price
+                base_balance += trade_quantity
 
-        # Log trade details to the CSV file.
+        elif combined_signal == "SELL":
+            # Ensure base coin balance (converted to USDT) is at least 10% of portfolio value.
+            if (base_balance * trade_price) < 0.1 * portfolio_value:
+                logging.info(f"Skipping SELL at {current_time}: insufficient {base_coin} value (Needed >= 10% of portfolio, Available: {base_balance * trade_price}, Portfolio: {portfolio_value})")
+            else:
+                # Use 99% of the base coin balance.
+                trade_quantity = 0.99 * base_balance
+                trade_executed = "Yes"
+                # Execute the trade (simulated).
+                executor.execute_trade(combined_signal, symbol, trade_quantity, price=trade_price)
+                # Update balances.
+                base_balance -= trade_quantity
+                usdt_balance += trade_quantity * trade_price
+
+        # Log the trade details for this 15m candle.
         with open(csv_file, mode='a', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([
-                trade_timestamp, signal_15m, signal_1h, combined_signal,
-                symbol, trade_quantity, trade_price, order_type, balance
+                current_time,
+                macd_value_15m, signal_value_15m, trade_signal_15m,
+                macd_value_1h, signal_value_1h, trade_signal_1h,
+                combined_signal, symbol, trade_quantity, trade_price, order_type,
+                usdt_balance, base_balance, trade_executed
             ])
 
-        trades.append({
-            "timestamp": trade_timestamp,
-            "signal_15m": signal_15m,
-            "signal_1h": signal_1h,
-            "combined_signal": combined_signal,
-            "quantity": trade_quantity,
-            "price": trade_price,
-            "balance": balance
-        })
+        # Only add to trades if a trade was executed.
+        if trade_executed == "Yes":
+            trades.append({
+                "timestamp": current_time,
+                "combined_signal": combined_signal,
+                "quantity": trade_quantity,
+                "price": trade_price,
+                "USDT_balance": usdt_balance,
+                f"{base_coin}_balance": base_balance
+            })
 
-    # Generate a summary report.
-    total_trades = len(trades)
-    # Example win/loss calculation: count a SELL as win if balance increases above initial.
-    wins = sum(1 for trade in trades if trade["combined_signal"] == "SELL" and trade["balance"] > initial_balance)
-    losses = total_trades - wins
-    pnl = balance - initial_balance
+    # After simulation, calculate the final portfolio value.
+    last_price = float(df_15m.iloc[-1]['close'])
+    portfolio_value = usdt_balance + (base_balance * last_price)
+    pnl = portfolio_value - initial_usdt
 
     print("Backtesting Summary Report")
     print("--------------------------")
-    print(f"Total Trades: {total_trades}")
-    print(f"Winning Trades: {wins}")
-    print(f"Losing Trades: {losses}")
-    print(f"Final Balance: {balance:.2f} USDT")
+    print(f"Total Trades Executed: {len(trades)}")
+    print(f"Final USDT Balance: {usdt_balance:.2f} USDT")
+    print(f"Final {base_coin} Balance: {base_balance:.4f} {base_coin}")
+    print(f"Total Portfolio Value: {portfolio_value:.2f} USDT")
     print(f"Net PnL: {pnl:.2f} USDT")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Backtesting Simulation for Trade Bot with Multi-Timeframe Signal"
+        description="Backtesting Simulation for Trade Bot with Multi-Timeframe MACD Signals, Position Management, and Trade Execution Checks"
     )
     parser.add_argument("--days", type=int, default=30, help="Number of days to simulate")
     parser.add_argument("--initial_usdt", type=float, default=1000.0, help="Initial USDT balance")
