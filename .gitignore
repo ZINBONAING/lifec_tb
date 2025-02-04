@@ -5,6 +5,7 @@ releaseme.py
 *.ipynb
 config.json
 tradebot.log
+lifec_tb.code-workspace
 
 # Additionally, if you want to ignore these directories anywhere
 release/

@@ -1,6 +1,6 @@
 # skeleton_main.py
 # This is a skeleton main file for the trade bot.
-# version 0.1.1
+# version v1.0.1
 
 import logging
 import time
