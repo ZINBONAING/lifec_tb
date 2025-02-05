@@ -18,7 +18,7 @@ class PositionManager:
         mode: str = "live",  # Options: "live", "backtest"
         atr_period: int = 14,
         trailing_stop_pct: float = 0.02,
-        stop_loss_mult: float = 1.5,
+        stop_loss_mult: float = 100,
         client: Optional[Client] = None,
         symbol: str = "LTCUSDT"
     ):
@@ -37,6 +37,9 @@ class PositionManager:
         # Risk parameters
         self.trailing_stop_pct = trailing_stop_pct
         self.stop_loss_mult = stop_loss_mult
+
+        # Watch mode flag: once current price reaches 5% above the last buy price, monitor for a red candle
+        self.watch_mode: bool = False
 
         # Binance Client (only needed in live mode)
         if client is None:
@@ -61,6 +64,7 @@ class PositionManager:
         }
         self.highest_price = entry_price
         self.trailing_stop = entry_price * (1 - self.trailing_stop_pct)
+        self.watch_mode = False  # Reset watch mode upon entering a new position
         logging.info(f"Entered position: {self.current_position}")
 
     def exit_position(self, exit_price: float, exit_reason: str, timestamp=None):
@@ -94,6 +98,7 @@ class PositionManager:
         self.current_position = None
         self.highest_price = None
         self.trailing_stop = None
+        self.watch_mode = False
 
     def calculate_atr(self) -> Optional[float]:
         """
@@ -122,7 +127,7 @@ class PositionManager:
         return atr
 
     def update_risk(self, current_price: float, timestamp=None):
-        """Update risk parameters like trailing stop and check stop-loss."""
+        """Update risk parameters like trailing stop and check stop-loss using ATR."""
         if not self.current_position:
             logging.warning("No active position to monitor.")
             return
@@ -148,27 +153,51 @@ class PositionManager:
             logging.info(f"Trailing stop triggered at {current_price}. Exiting position.")
             self.exit_position(current_price, "Trailing Stop", timestamp)
 
-    def monitor_position(self, current_price: float, high: Optional[float] = None,
-                         low: Optional[float] = None, timestamp=None):
-        """Monitor the current position and apply risk controls."""
-        if self.current_position:
-            if not all([high, low]):
-                high = current_price
-                low = current_price
+    def monitor_position(self, current_price: float, open_price: Optional[float] = None,
+                     high: Optional[float] = None, low: Optional[float] = None, timestamp=None):
+        """
+        Monitor the current position at each 15m close interval.
+        Updates ATR data and applies risk controls.
+        New logic:
+        - If not already in watch mode and current price >= 5% above the entry price, activate watch mode.
+        - If in watch mode and a red candle occurs (i.e. close < open), trigger an exit.
+        """
+        # If no active position, simply return.
+        if self.current_position is None:
+            return
 
-            self.price_history.append({
-                "high": high,
-                "low": low,
-                "close": current_price
-            })
-            logging.debug(f"Updated price history with High: {high}, Low: {low}, Close: {current_price}")
+        # If high or low are not provided, use current_price.
+        if high is None or low is None:
+            high = current_price
+            low = current_price
 
-            self.atr = self.calculate_atr()
+        self.price_history.append({
+            "high": high,
+            "low": low,
+            "close": current_price
+        })
+        logging.debug(f"Updated price history with High: {high}, Low: {low}, Close: {current_price}")
 
-            if self.mode == "backtest" and timestamp:
-                logging.info(f"Backtest Mode - Timestamp: {timestamp}")
+        # Update ATR based on the price history.
+        self.atr = self.calculate_atr()
 
-            self.update_risk(current_price, timestamp)
+        # Apply existing risk controls.
+        self.update_risk(current_price, timestamp)
+
+        # New watch mode logic:
+        # Check if we have an active position and the entry price is available.
+        if self.current_position and not self.watch_mode and self.current_position.get("entry_price"):
+            if current_price >= self.current_position["entry_price"] * 1.05:
+                self.watch_mode = True
+                logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {self.current_position['entry_price']}.")
+
+        # If in watch mode and the candle is red (current price < open), trigger an exit.
+        if self.watch_mode and open_price is not None:
+            if current_price < open_price:
+                logging.info(f"Red candle detected in watch mode at {timestamp}. Current price {current_price} < open {open_price}. Triggering exit.")
+                self.exit_position(current_price, "Watch Mode Red Candle", timestamp)
+
+
 
     def summarize_positions(self):
         """Summarize all closed positions."""
