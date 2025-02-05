@@ -42,6 +42,7 @@ def simulate_trading(args):
     # Define the two intervals: heartbeat on 15m, confirmation on 1h.
     interval_15m = "15m"
     interval_1h = "1h"
+    candle_interval = timedelta(minutes=15)  # The expected interval between candles
 
     # Initialize TradeExecutor in mock mode.
     executor = TradeExecutor(mock_mode=True)
@@ -83,8 +84,8 @@ def simulate_trading(args):
     # Initialize PositionManager in backtest mode.
     pos_manager = PositionManager(initial_balance=initial_usdt, mode="backtest", symbol=symbol)
 
-    # Variable to indicate a cooldown period after an exit.
-    cooldown_active = False
+    # Variable to hold the cooldown expiration timestamp.
+    cooldown_until = None
 
     # Prepare the CSV file for logging trades.
     # Added new columns: "trade_pnl", "trigger_reason", "watch_mode_entered", and "cooldown_active"
@@ -136,12 +137,13 @@ def simulate_trading(args):
         # Get current portfolio data from the PositionManager.
         current_bal = pos_manager.get_current_position()
 
-        # Check if we're in a cooldown period. If so, skip any new entry signals.
-        if cooldown_active:
+        # Check if we're in a cooldown period based on cooldown_until.
+        if cooldown_until is not None and ts <= cooldown_until:
             position_action = "Cooldown Active"
             cooldown_flag = "Yes"
-            # Do not process new BUY entries in cooldown.
         else:
+            # If cooldown period is over, clear cooldown.
+            cooldown_until = None
             # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
             if pos_manager.current_position is None and combined_signal == "BUY":
                 available_usdt = current_bal["quote_balance"]
@@ -164,8 +166,10 @@ def simulate_trading(args):
             # Determine position action after monitoring.
             if pos_manager.current_position is None:
                 position_action = "Exited"
-                # When an exit occurs, set cooldown_active for the next candle.
-                cooldown_active = True
+                # When an exit occurs, set a cooldown period of one candle.
+                #cooldown_until = ts + candle_interval
+                cooldown_until = ts + (10 * candle_interval)
+
             elif pos_manager.watch_mode:
                 position_action = "Watch Mode Active"
                 if pos_manager.watch_mode_entered:
@@ -173,14 +177,9 @@ def simulate_trading(args):
             else:
                 position_action = "Holding"
         else:
-            # No active position: if we weren't in cooldown, clear cooldown flag.
-            if not cooldown_active:
+            # No active position: if not in cooldown, mark as "No Position".
+            if cooldown_until is None:
                 position_action = "No Position"
-        
-        # Reset cooldown after one candle.
-        # (Assumes cooldown lasts exactly one candle period.)
-        if cooldown_active:
-            cooldown_active = False
 
         # After monitoring, check if a trade was closed in this candle.
         if pos_manager.position_log:
