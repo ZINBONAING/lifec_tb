@@ -40,6 +40,8 @@ class PositionManager:
 
         # Watch mode flag: once current price reaches 5% above the last buy price, monitor for a red candle
         self.watch_mode: bool = False
+        # New attribute to record when watch mode is entered (timestamp or None)
+        self.watch_mode_entered: Optional[str] = None
 
         # Binance Client (only needed in live mode)
         if client is None:
@@ -65,6 +67,7 @@ class PositionManager:
         self.highest_price = entry_price
         self.trailing_stop = entry_price * (1 - self.trailing_stop_pct)
         self.watch_mode = False  # Reset watch mode upon entering a new position
+        self.watch_mode_entered = None  # Clear previous watch mode flag
         logging.info(f"Entered position: {self.current_position}")
 
     def exit_position(self, exit_price: float, exit_reason: str, timestamp=None):
@@ -99,6 +102,7 @@ class PositionManager:
         self.highest_price = None
         self.trailing_stop = None
         self.watch_mode = False
+        self.watch_mode_entered = None
 
     def calculate_atr(self) -> Optional[float]:
         """
@@ -154,7 +158,7 @@ class PositionManager:
             self.exit_position(current_price, "Trailing Stop", timestamp)
 
     def monitor_position(self, current_price: float, open_price: Optional[float] = None,
-                     high: Optional[float] = None, low: Optional[float] = None, timestamp=None):
+                         high: Optional[float] = None, low: Optional[float] = None, timestamp=None):
         """
         Monitor the current position at each 15m close interval.
         Updates ATR data and applies risk controls.
@@ -189,6 +193,7 @@ class PositionManager:
         if self.current_position and not self.watch_mode and self.current_position.get("entry_price"):
             if current_price >= self.current_position["entry_price"] * 1.05:
                 self.watch_mode = True
+                self.watch_mode_entered = timestamp  # Record when watch mode is activated.
                 logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {self.current_position['entry_price']}.")
 
         # If in watch mode and the candle is red (current price < open), trigger an exit.
@@ -196,8 +201,6 @@ class PositionManager:
             if current_price < open_price:
                 logging.info(f"Red candle detected in watch mode at {timestamp}. Current price {current_price} < open {open_price}. Triggering exit.")
                 self.exit_position(current_price, "Watch Mode Red Candle", timestamp)
-
-
 
     def summarize_positions(self):
         """Summarize all closed positions."""

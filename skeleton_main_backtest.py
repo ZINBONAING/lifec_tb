@@ -83,8 +83,11 @@ def simulate_trading(args):
     # Initialize PositionManager in backtest mode.
     pos_manager = PositionManager(initial_balance=initial_usdt, mode="backtest", symbol=symbol)
 
+    # Variable to indicate a cooldown period after an exit.
+    cooldown_active = False
+
     # Prepare the CSV file for logging trades.
-    # Added two new columns: "trade_pnl", "trigger_reason", and "watch_mode_entered"
+    # Added new columns: "trade_pnl", "trigger_reason", "watch_mode_entered", and "cooldown_active"
     csv_file = "trades_log.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
@@ -94,7 +97,8 @@ def simulate_trading(args):
             "macd_1h", "signal_line_1h", "trade_signal_1h",
             "combined_signal", "symbol", "trade_quantity", "price", "order_type",
             "USDT_balance", f"{base_coin}_balance", "trade_executed",
-            "position_action", "trade_pnl", "trigger_reason", "watch_mode_entered"
+            "position_action", "trade_pnl", "trigger_reason", 
+            "watch_mode_entered", "cooldown_active"
         ])
 
     trades = []  # For storing trade details for summary reporting
@@ -127,36 +131,56 @@ def simulate_trading(args):
         trade_pnl = ""
         trigger_reason = ""
         watch_mode_entered = ""
+        cooldown_flag = "No"
 
         # Get current portfolio data from the PositionManager.
         current_bal = pos_manager.get_current_position()
 
-        # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
-        if pos_manager.current_position is None and combined_signal == "BUY":
-            available_usdt = current_bal["quote_balance"]
-            portfolio_value = available_usdt  # For backtest, all funds are initially in quote.
-            if available_usdt >= 0.1 * portfolio_value:
-                trade_qty = (0.99 * available_usdt) / current_price
-                trade_executed = "Yes"
-                position_action = "Entered"
-                pos_manager.enter_position(symbol, trade_qty, current_price, reason="Signal BUY")
-                executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
-            else:
-                position_action = "Insufficient Funds for Entry"
+        # Check if we're in a cooldown period. If so, skip any new entry signals.
+        if cooldown_active:
+            position_action = "Cooldown Active"
+            cooldown_flag = "Yes"
+            # Do not process new BUY entries in cooldown.
         else:
-            # If a position is active, let the PositionManager monitor the position.
+            # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
+            if pos_manager.current_position is None and combined_signal == "BUY":
+                available_usdt = current_bal["quote_balance"]
+                portfolio_value = available_usdt  # For backtest, all funds are initially in quote.
+                if available_usdt >= 0.1 * portfolio_value:
+                    trade_qty = (0.99 * available_usdt) / current_price
+                    trade_executed = "Yes"
+                    position_action = "Entered"
+                    pos_manager.enter_position(symbol, trade_qty, current_price, reason="Signal BUY")
+                    executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
+                else:
+                    position_action = "Insufficient Funds for Entry"
+
+        # If a position is active, let the PositionManager monitor it.
+        if pos_manager.current_position is not None:
             pos_manager.monitor_position(current_price, open_price=open_price,
                                          high=float(row.get('high', current_price)),
                                          low=float(row.get('low', current_price)),
                                          timestamp=ts)
-            # Determine position action.
+            # Determine position action after monitoring.
             if pos_manager.current_position is None:
                 position_action = "Exited"
+                # When an exit occurs, set cooldown_active for the next candle.
+                cooldown_active = True
             elif pos_manager.watch_mode:
                 position_action = "Watch Mode Active"
-                watch_mode_entered = "Yes"
+                if pos_manager.watch_mode_entered:
+                    watch_mode_entered = "Yes"
             else:
                 position_action = "Holding"
+        else:
+            # No active position: if we weren't in cooldown, clear cooldown flag.
+            if not cooldown_active:
+                position_action = "No Position"
+        
+        # Reset cooldown after one candle.
+        # (Assumes cooldown lasts exactly one candle period.)
+        if cooldown_active:
+            cooldown_active = False
 
         # After monitoring, check if a trade was closed in this candle.
         if pos_manager.position_log:
@@ -177,7 +201,7 @@ def simulate_trading(args):
                 combined_signal, symbol, trade_qty, current_price, "LIMIT",
                 current_bal["quote_balance"], current_bal["base_balance"],
                 trade_executed, position_action,
-                trade_pnl, trigger_reason, watch_mode_entered
+                trade_pnl, trigger_reason, watch_mode_entered, cooldown_flag
             ])
 
         # If a trade was executed, record it.
