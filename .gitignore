@@ -1,7 +1,6 @@
 # Ignore files and directories in the python folder
 *.csv
 release/
-releaseme.py
 *.ipynb
 config.json
 tradebot.log
