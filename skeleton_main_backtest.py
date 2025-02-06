@@ -10,15 +10,21 @@ from trade_executor import TradeExecutor
 from SignalManager4 import SignalManager        # :contentReference[oaicite:1]{index=1}
 from position_manager import PositionManager      # Use your updated PositionManager code
 
-def combine_signals(signal_15m, signal_1h):
+def combine_signals(signal_1h):
     """
-    Combine the signals from 15m and 1h timeframes.
-    For this example, we only trade if both signals agree.
-    Otherwise, return "HOLD" to skip execution.
+    New combination logic:
+      - Return "BUY" only if both 15m and 1h signals are BUY.
+      - Return "SELL" if either signal is SELL.
+      - Otherwise, return "HOLD".
     """
-    if signal_15m == signal_1h:
-        return signal_15m
-    return "HOLD"
+    if signal_1h == "BUY":
+        return "BUY"
+    elif signal_1h == "SELL":
+        return "SELL"
+    else:
+        return "HOLD"
+    
+
 
 def parse_symbol(symbol):
     """
@@ -42,7 +48,9 @@ def simulate_trading(args):
     # Define the two intervals: heartbeat on 15m, confirmation on 1h.
     interval_15m = "15m"
     interval_1h = "1h"
-    candle_interval = timedelta(minutes=15)  # The expected interval between candles
+    candle_interval = timedelta(minutes=15)  # Duration of one candle
+    # For cooldown, we'll set it to 10 candles after an exit:
+    cooldown_duration = 10 * candle_interval
 
     # Initialize TradeExecutor in mock mode.
     executor = TradeExecutor(mock_mode=True)
@@ -123,7 +131,7 @@ def simulate_trading(args):
         sig_val_1h = row_1h['signal_line']
 
         # Combine the signals.
-        combined_signal = combine_signals(signal_15m, signal_1h)
+        combined_signal = combine_signals(signal_1h)
 
         # Initialize flags/variables.
         trade_executed = "No"
@@ -137,14 +145,14 @@ def simulate_trading(args):
         # Get current portfolio data from the PositionManager.
         current_bal = pos_manager.get_current_position()
 
-        # Check if we're in a cooldown period based on cooldown_until.
+        # Check if we're in a cooldown period.
         if cooldown_until is not None and ts <= cooldown_until:
             position_action = "Cooldown Active"
             cooldown_flag = "Yes"
         else:
-            # If cooldown period is over, clear cooldown.
+            # Cooldown period has expired.
             cooldown_until = None
-            # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
+            # If no active position and combined signal is BUY, then enter.
             if pos_manager.current_position is None and combined_signal == "BUY":
                 available_usdt = current_bal["quote_balance"]
                 portfolio_value = available_usdt  # For backtest, all funds are initially in quote.
@@ -156,8 +164,13 @@ def simulate_trading(args):
                     executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
                 else:
                     position_action = "Insufficient Funds for Entry"
-
-        # If a position is active, let the PositionManager monitor it.
+            # Additionally, if a position exists and the combined signal is SELL, exit using the signal.
+            elif pos_manager.current_position is not None and combined_signal == "SELL":
+                pos_manager.exit_position(current_price, "SELL Signal", ts)
+                position_action = "Exited via SELL Signal"
+                cooldown_until = ts + cooldown_duration
+            # Otherwise, if a position is active, let the PositionManager monitor it.
+        
         if pos_manager.current_position is not None:
             pos_manager.monitor_position(current_price, open_price=open_price,
                                          high=float(row.get('high', current_price)),
@@ -166,10 +179,7 @@ def simulate_trading(args):
             # Determine position action after monitoring.
             if pos_manager.current_position is None:
                 position_action = "Exited"
-                # When an exit occurs, set a cooldown period of one candle.
-                #cooldown_until = ts + candle_interval
-                cooldown_until = ts + (10 * candle_interval)
-
+                cooldown_until = ts + cooldown_duration
             elif pos_manager.watch_mode:
                 position_action = "Watch Mode Active"
                 if pos_manager.watch_mode_entered:
@@ -177,14 +187,12 @@ def simulate_trading(args):
             else:
                 position_action = "Holding"
         else:
-            # No active position: if not in cooldown, mark as "No Position".
             if cooldown_until is None:
                 position_action = "No Position"
 
         # After monitoring, check if a trade was closed in this candle.
         if pos_manager.position_log:
             last_closed = pos_manager.position_log[-1]
-            # Compare timestamps – if the closed trade's timestamp matches the current candle's timestamp.
             if pd.to_datetime(last_closed.get("timestamp")) == ts:
                 trade_pnl = last_closed.get("pnl", "")
                 trigger_reason = last_closed.get("reason", "")
@@ -203,7 +211,6 @@ def simulate_trading(args):
                 trade_pnl, trigger_reason, watch_mode_entered, cooldown_flag
             ])
 
-        # If a trade was executed, record it.
         if trade_executed == "Yes":
             trades.append({
                 "timestamp": ts,
@@ -214,7 +221,6 @@ def simulate_trading(args):
                 f"{base_coin}_balance": current_bal["base_balance"]
             })
 
-    # After simulation, calculate final portfolio value.
     last_price = float(df_15m.iloc[-1]['close'])
     final_bal = pos_manager.get_current_position()
     portfolio_value = final_bal["quote_balance"] + (final_bal["base_balance"] * last_price)

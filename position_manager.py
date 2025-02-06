@@ -132,26 +132,14 @@ class PositionManager:
         return atr
 
     def update_risk(self, current_price: float, timestamp=None):
-        """
-        Update risk parameters.
-        - If watch mode is not active, use a fixed stop loss based on entry_price and fixed_stop_pct.
-        - Once watch mode is activated (current_price >= entry_price * 1.05), use ATR-based trailing stop.
-        """
+        """Update risk parameters like trailing stop and check stop-loss using ATR."""
         if not self.current_position:
             logging.warning("No active position to monitor.")
             return
 
         entry_price = self.current_position["entry_price"]
 
-        # Before watch mode: use fixed stop loss.
-        if not self.watch_mode:
-            fixed_stop_price = entry_price * (1 - self.fixed_stop_pct)
-            if current_price <= fixed_stop_price:
-                logging.info(f"Fixed stop loss triggered at {current_price} (fixed stop: {fixed_stop_price}). Exiting position.")
-                self.exit_position(current_price, "Fixed Stop Loss", timestamp)
-                return  # Exit risk update once position is closed.
-
-        # Update highest price and calculate trailing stop only if in profit or moving higher.
+        # Update highest price if current_price is greater than previous highest.
         if self.highest_price is None or current_price > self.highest_price:
             self.highest_price = current_price
             logging.info(f"Updated highest price: {self.highest_price}")
@@ -173,6 +161,8 @@ class PositionManager:
         if self.watch_mode and self.trailing_stop and current_price <= self.trailing_stop:
             logging.info(f"Trailing stop triggered at {current_price}. Exiting position.")
             self.exit_position(current_price, "Trailing Stop", timestamp)
+
+
 
     def monitor_position(self, current_price: float, open_price: Optional[float] = None,
                          high: Optional[float] = None, low: Optional[float] = None, timestamp=None):
