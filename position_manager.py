@@ -18,7 +18,8 @@ class PositionManager:
         mode: str = "live",  # Options: "live", "backtest"
         atr_period: int = 14,
         trailing_stop_pct: float = 0.02,
-        stop_loss_mult: float = 100,
+        stop_loss_mult: float = 1.5,
+        fixed_stop_pct: float = 1,  # Fixed stop loss percentage before watch mode (e.g., 2%)
         client: Optional[Client] = None,
         symbol: str = "LTCUSDT"
     ):
@@ -37,6 +38,7 @@ class PositionManager:
         # Risk parameters
         self.trailing_stop_pct = trailing_stop_pct
         self.stop_loss_mult = stop_loss_mult
+        self.fixed_stop_pct = fixed_stop_pct  # New parameter for fixed stop loss
 
         # Watch mode flag: once current price reaches 5% above the last buy price, monitor for a red candle
         self.watch_mode: bool = False
@@ -56,7 +58,6 @@ class PositionManager:
         if self.current_position:
             logging.error("Attempted to enter a position while another is active.")
             raise Exception("Position already active.")
-
         self.current_position = {
             "symbol": symbol,
             "quantity": quantity,
@@ -131,15 +132,29 @@ class PositionManager:
         return atr
 
     def update_risk(self, current_price: float, timestamp=None):
-        """Update risk parameters like trailing stop and check stop-loss using ATR."""
+        """
+        Update risk parameters.
+        - If watch mode is not active, use a fixed stop loss based on entry_price and fixed_stop_pct.
+        - Once watch mode is activated (current_price >= entry_price * 1.05), use ATR-based trailing stop.
+        """
         if not self.current_position:
             logging.warning("No active position to monitor.")
             return
 
+        entry_price = self.current_position["entry_price"]
+
+        # Before watch mode: use fixed stop loss.
+        if not self.watch_mode:
+            fixed_stop_price = entry_price * (1 - self.fixed_stop_pct)
+            if current_price <= fixed_stop_price:
+                logging.info(f"Fixed stop loss triggered at {current_price} (fixed stop: {fixed_stop_price}). Exiting position.")
+                self.exit_position(current_price, "Fixed Stop Loss", timestamp)
+                return  # Exit risk update once position is closed.
+
+        # Update highest price and calculate trailing stop only if in profit or moving higher.
         if self.highest_price is None or current_price > self.highest_price:
             self.highest_price = current_price
             logging.info(f"Updated highest price: {self.highest_price}")
-
             if self.atr:
                 self.trailing_stop = self.highest_price - (self.stop_loss_mult * self.atr)
                 logging.info(f"Updated trailing stop based on ATR: {self.trailing_stop}")
@@ -147,13 +162,15 @@ class PositionManager:
                 self.trailing_stop = self.highest_price * (1 - self.trailing_stop_pct)
                 logging.info(f"Updated trailing stop without ATR: {self.trailing_stop}")
 
-        if self.atr:
-            stop_loss_price = self.current_position["entry_price"] - (self.stop_loss_mult * self.atr)
-            if current_price <= stop_loss_price:
-                logging.info(f"ATR-based stop-loss triggered at {current_price}. Exiting position.")
-                self.exit_position(current_price, "ATR Stop Loss", timestamp)
+        # If not in watch mode, check if the price has moved favorably enough to switch to ATR-based trailing.
+        if not self.watch_mode:
+            if current_price >= entry_price * 1.05:
+                self.watch_mode = True
+                self.watch_mode_entered = timestamp
+                logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {entry_price}.")
 
-        if self.trailing_stop and current_price <= self.trailing_stop:
+        # Once in watch mode, check the ATR-based trailing stop.
+        if self.watch_mode and self.trailing_stop and current_price <= self.trailing_stop:
             logging.info(f"Trailing stop triggered at {current_price}. Exiting position.")
             self.exit_position(current_price, "Trailing Stop", timestamp)
 
@@ -163,18 +180,20 @@ class PositionManager:
         Monitor the current position at each 15m close interval.
         Updates ATR data and applies risk controls.
         New logic:
-        - If not already in watch mode and current price >= 5% above the entry price, activate watch mode.
-        - If in watch mode and a red candle occurs (i.e. close < open), trigger an exit.
+        - Before watch mode: use fixed stop loss.
+        - If current_price >= 5% above entry, activate watch mode.
+        - Once in watch mode, use ATR-based trailing stop and exit if a red candle occurs.
         """
         # If no active position, simply return.
         if self.current_position is None:
             return
 
-        # If high or low are not provided, use current_price.
+        # If high or low are not provided, default to current_price.
         if high is None or low is None:
             high = current_price
             low = current_price
 
+        # Append current candle data for ATR calculation.
         self.price_history.append({
             "high": high,
             "low": low,
@@ -182,21 +201,13 @@ class PositionManager:
         })
         logging.debug(f"Updated price history with High: {high}, Low: {low}, Close: {current_price}")
 
-        # Update ATR based on the price history.
+        # Recalculate ATR.
         self.atr = self.calculate_atr()
 
-        # Apply existing risk controls.
+        # Update risk based on our current logic.
         self.update_risk(current_price, timestamp)
 
-        # New watch mode logic:
-        # Check if we have an active position and the entry price is available.
-        if self.current_position and not self.watch_mode and self.current_position.get("entry_price"):
-            if current_price >= self.current_position["entry_price"] * 1.05:
-                self.watch_mode = True
-                self.watch_mode_entered = timestamp  # Record when watch mode is activated.
-                logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {self.current_position['entry_price']}.")
-
-        # If in watch mode and the candle is red (current price < open), trigger an exit.
+        # Additional exit on red candle in watch mode.
         if self.watch_mode and open_price is not None:
             if current_price < open_price:
                 logging.info(f"Red candle detected in watch mode at {timestamp}. Current price {current_price} < open {open_price}. Triggering exit.")
