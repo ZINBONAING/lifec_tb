@@ -166,12 +166,23 @@ def simulate_trading(args):
                 else:
                     position_action = "Insufficient Funds for Entry"
             # Additionally, if a position exists and the combined signal is SELL, exit using the signal.
-            elif pos_manager.current_position is not None and combined_signal == "SELL":
-                pos_manager.exit_position(current_price, "SELL Signal", ts)
-                position_action = "Exited via SELL Signal"
-                cooldown_until = ts + cooldown_duration
+            #--oFF it for a while to enable SELL only profit. hehe 
+            #elif pos_manager.current_position is not None and combined_signal == "SELL":
+            #    pos_manager.exit_position(current_price, "SELL Signal", ts)
+            #    position_action = "Exited via SELL Signal"
+            #    cooldown_until = ts + cooldown_duration
             # Otherwise, if a position is active, let the PositionManager monitor it.
-        
+
+            elif pos_manager.current_position is not None and combined_signal == "SELL":
+                entry_price = pos_manager.current_position["entry_price"]
+                # Only exit if you are in profit (current price > entry price)
+                if current_price > entry_price:
+                    pos_manager.exit_position(current_price, "SELL Signal Profit Exit", ts)
+                    position_action = "Exited via SELL Signal (Profit)"
+                    cooldown_until = ts + cooldown_duration
+                else:
+                    position_action = "Sell Signal Ignored (Not in Profit)"
+
         if pos_manager.current_position is not None:
             pos_manager.monitor_position(current_price, open_price=open_price,
                                          high=float(row.get('high', current_price)),
