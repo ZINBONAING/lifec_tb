@@ -237,7 +237,11 @@ def simulate_trading(args):
     final_bal = pos_manager.get_current_position()
     portfolio_value = final_bal["quote_balance"] + (final_bal["base_balance"] * last_price)
     pnl = portfolio_value - initial_usdt
+    final_profit = pos_manager.profit_account
+    final_profit_count = pos_manager.profit_taken_count
 
+    print(f"Final Profit Account: {final_profit:.2f} USDT")
+    print(f"Profit Taken Count: {final_profit_count}")
     print("Backtesting Summary Report")
     print("--------------------------")
     print(f"Total Trades Executed: {len(trades)}")

@@ -1,4 +1,3 @@
-#position_manager.py
 import json
 import logging
 from collections import deque
@@ -18,13 +17,17 @@ class PositionManager:
         initial_balance: float,
         mode: str = "live",  # Options: "live", "backtest"
         atr_period: int = 14,
-        trailing_stop_pct: float = 0.02,
+        trailing_stop_pct: float = 0.025,
         stop_loss_mult: float = 1.5,
-        fixed_stop_pct: float = 1,  # Fixed stop loss percentage before watch mode (e.g., 2%)
+        fixed_stop_pct: float = 1,  # Fixed stop loss percentage before watch mode (e.g., 100% here means not used)
         client: Optional[Client] = None,
         symbol: str = "LTCUSDT"
     ):
+        self.initial_balance = initial_balance  # Store initial capital
         self.balance = initial_balance
+        self.profit_account = 0.0               # Profit that has been taken out
+        self.profit_taken_count = 0             # Number of profit-taking events
+        
         self.mode = mode.lower()
         self.current_position: Optional[Dict] = None  # Active trade record
         self.position_log: List[Dict] = []
@@ -87,6 +90,7 @@ class PositionManager:
 
         self.balance += pnl
 
+        # Prepare a closed position record.
         closed_position = {
             "symbol": self.current_position["symbol"],
             "quantity": quantity,
@@ -94,8 +98,24 @@ class PositionManager:
             "exit_price": exit_price,
             "pnl": pnl,
             "reason": exit_reason,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            # Initialize profit details; these may remain 0 if no profit transfer occurs.
+            "profit_taken": 0.0,
+            "profit_taken_count": self.profit_taken_count
         }
+
+        # Profit Management:
+        # Define a target balance (initial_balance + 10% of initial_balance).
+        target_balance = self.initial_balance * 1.10
+        if self.balance > target_balance:
+            profit_to_take = self.balance - target_balance
+            self.balance = target_balance
+            self.profit_account += profit_to_take
+            self.profit_taken_count += 1
+            closed_position["profit_taken"] = profit_to_take
+            closed_position["profit_taken_count"] = self.profit_taken_count
+            logging.info(f"Profit taken: {profit_to_take}. Profit count: {self.profit_taken_count}, Profit account: {self.profit_account}")
+
         self.position_log.append(closed_position)
         logging.info(f"Exited position: {closed_position}")
 
@@ -105,6 +125,7 @@ class PositionManager:
         self.trailing_stop = None
         self.watch_mode = False
         self.watch_mode_entered = None
+
 
     def calculate_atr(self) -> Optional[float]:
         """
@@ -133,14 +154,33 @@ class PositionManager:
         return atr
 
     def update_risk(self, current_price: float, timestamp=None):
-        """Update risk parameters like trailing stop and check stop-loss using ATR."""
+        """
+        Update risk parameters.
+        - If NOT in watch mode, do not trigger a risk-based exit; allow normal signal-based SELL.
+        - Once watch mode is activated (when current_price >= entry_price * 1.05),
+          use ATR-based trailing stop to exit.
+        """
         if not self.current_position:
             logging.warning("No active position to monitor.")
             return
 
         entry_price = self.current_position["entry_price"]
 
-        # Update highest price if current_price is greater than previous highest.
+        # Before watch mode, no automatic exit is triggered by risk management.
+        # (This allows the normal SELL signal to govern exit.)
+        # However, we still update the highest price.
+        if not self.watch_mode:
+            if self.highest_price is None or current_price > self.highest_price:
+                self.highest_price = current_price
+                logging.info(f"Updated highest price (pre-watch mode): {self.highest_price}")
+            # Check if watch mode should be activated.
+            if current_price >= entry_price * 1.06:
+                self.watch_mode = True
+                self.watch_mode_entered = timestamp
+                logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {entry_price}.")
+            return  # Exit risk update until watch mode is on.
+
+        # Once in watch mode, update highest price and trailing stop.
         if self.highest_price is None or current_price > self.highest_price:
             self.highest_price = current_price
             logging.info(f"Updated highest price: {self.highest_price}")
@@ -151,19 +191,10 @@ class PositionManager:
                 self.trailing_stop = self.highest_price * (1 - self.trailing_stop_pct)
                 logging.info(f"Updated trailing stop without ATR: {self.trailing_stop}")
 
-        # If not in watch mode, check if the price has moved favorably enough to switch to ATR-based trailing.
-        if not self.watch_mode:
-            if current_price >= entry_price * 1.45:
-                self.watch_mode = True
-                self.watch_mode_entered = timestamp
-                logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {entry_price}.")
-
-        # Once in watch mode, check the ATR-based trailing stop.
-        if self.watch_mode and self.trailing_stop and current_price <= self.trailing_stop:
+        # Check if the current price has dropped to or below the trailing stop.
+        if self.trailing_stop and current_price <= self.trailing_stop:
             logging.info(f"Trailing stop triggered at {current_price}. Exiting position.")
             self.exit_position(current_price, "Trailing Stop", timestamp)
-
-
 
     def monitor_position(self, current_price: float, open_price: Optional[float] = None,
                          high: Optional[float] = None, low: Optional[float] = None, timestamp=None):
@@ -171,20 +202,16 @@ class PositionManager:
         Monitor the current position at each 15m close interval.
         Updates ATR data and applies risk controls.
         New logic:
-        - Before watch mode: use fixed stop loss.
-        - If current_price >= 5% above entry, activate watch mode.
-        - Once in watch mode, use ATR-based trailing stop and exit if a red candle occurs.
+          - Before watch mode: no risk-based exit is triggered (normal signals govern exit).
+          - Once in watch mode, use ATR-based trailing stop and also exit on a red candle.
         """
-        # If no active position, simply return.
         if self.current_position is None:
             return
 
-        # If high or low are not provided, default to current_price.
         if high is None or low is None:
             high = current_price
             low = current_price
 
-        # Append current candle data for ATR calculation.
         self.price_history.append({
             "high": high,
             "low": low,
@@ -192,27 +219,23 @@ class PositionManager:
         })
         logging.debug(f"Updated price history with High: {high}, Low: {low}, Close: {current_price}")
 
-        # Recalculate ATR.
         self.atr = self.calculate_atr()
-
-        # Update risk based on our current logic.
         self.update_risk(current_price, timestamp)
 
-        # Additional exit on red candle in watch mode.
+        # Additional exit condition: in watch mode, if a red candle is detected (current close < open), exit.
         if self.watch_mode and open_price is not None:
-            if current_price+(open_price*0.01) < open_price:
+            if current_price < open_price:
                 logging.info(f"Red candle detected in watch mode at {timestamp}. Current price {current_price} < open {open_price}. Triggering exit.")
                 self.exit_position(current_price, "Watch Mode Red Candle", timestamp)
 
     def summarize_positions(self):
-        """Summarize all closed positions."""
+        """Summarize all closed positions and profit management details."""
         logging.info("--- Position Summary ---")
         for position in self.position_log:
             logging.info(position)
-
         total_pnl = sum(p['pnl'] for p in self.position_log)
         logging.info(f"Total P&L: {total_pnl}")
-
+        logging.info(f"Profit taken count: {self.profit_taken_count}, Profit account: {self.profit_account}")
         if self.position_log:
             avg_pnl = total_pnl / len(self.position_log)
             win_count = len([p for p in self.position_log if p['pnl'] > 0])
@@ -221,7 +244,6 @@ class PositionManager:
             logging.info(f"Winning Trades: {win_count}, Losing Trades: {loss_count}")
 
     def get_base_asset(self, symbol: str) -> str:
-        """Helper function to extract the base asset from a trading pair."""
         if symbol.endswith("USDT"):
             return symbol.replace("USDT", "")
         elif symbol.endswith("BUSD"):
@@ -229,31 +251,23 @@ class PositionManager:
         return symbol
 
     def get_quote_asset(self, symbol: str) -> str:
-        """Helper function to extract the quote asset from a trading pair."""
         base_asset = self.get_base_asset(symbol)
         return symbol.replace(base_asset, "")
 
     def get_current_position(self):
-        """
-        Retrieve details of the current position for the target pair.
-        For a target pair like LTCUSDT, this method returns both the base and quote asset balances.
-        """
         if self.mode == "live" and self.client:
             try:
                 base_asset = self.get_base_asset(self.symbol)
                 quote_asset = self.get_quote_asset(self.symbol)
                 logging.info(f"Fetching balance for base asset: {base_asset} and quote asset: {quote_asset}")
-                
                 base_balance_info = self.client.get_asset_balance(asset=base_asset)
                 quote_balance_info = self.client.get_asset_balance(asset=quote_asset)
-
                 base_balance = 0.0
                 if base_balance_info:
                     base_balance = float(base_balance_info.get('free', 0)) + float(base_balance_info.get('locked', 0))
                 quote_balance = 0.0
                 if quote_balance_info:
                     quote_balance = float(quote_balance_info.get('free', 0)) + float(quote_balance_info.get('locked', 0))
-
                 return {
                     "symbol": self.symbol,
                     "base_asset": base_asset,
@@ -270,7 +284,6 @@ class PositionManager:
                 logging.error(f"Unexpected error in get_current_position: {e}")
                 return None
         else:
-            # In backtest mode, assume the entire balance is held in the quote asset.
             return {
                 "symbol": self.symbol,
                 "base_asset": self.get_base_asset(self.symbol),
