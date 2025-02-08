@@ -152,7 +152,7 @@ class PositionManager:
 
         # If not in watch mode, check if the price has moved favorably enough to switch to ATR-based trailing.
         if not self.watch_mode:
-            if current_price >= entry_price * 1.05:
+            if current_price >= entry_price * 1.45:
                 self.watch_mode = True
                 self.watch_mode_entered = timestamp
                 logging.info(f"Watch mode activated at {timestamp}. Current price {current_price} >= 5% above entry {entry_price}.")
@@ -199,7 +199,7 @@ class PositionManager:
 
         # Additional exit on red candle in watch mode.
         if self.watch_mode and open_price is not None:
-            if current_price < open_price:
+            if current_price+(open_price*0.01) < open_price:
                 logging.info(f"Red candle detected in watch mode at {timestamp}. Current price {current_price} < open {open_price}. Triggering exit.")
                 self.exit_position(current_price, "Watch Mode Red Candle", timestamp)
 

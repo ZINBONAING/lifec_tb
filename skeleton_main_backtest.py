@@ -10,19 +10,20 @@ from trade_executor import TradeExecutor
 from SignalManager4 import SignalManager        # :contentReference[oaicite:1]{index=1}
 from position_manager import PositionManager      # Use your updated PositionManager code
 
-def combine_signals(signal_1h):
+def combine_signals(signal_15m, signal_1h):
     """
     New combination logic:
       - Return "BUY" only if both 15m and 1h signals are BUY.
       - Return "SELL" if either signal is SELL.
       - Otherwise, return "HOLD".
     """
-    if signal_1h == "BUY":
+    if signal_15m == "BUY" and signal_1h == "BUY":
         return "BUY"
-    elif signal_1h == "SELL":
+    elif signal_15m == "SELL" or signal_1h == "SELL":
         return "SELL"
     else:
         return "HOLD"
+
     
 
 
@@ -50,7 +51,7 @@ def simulate_trading(args):
     interval_1h = "1h"
     candle_interval = timedelta(minutes=15)  # Duration of one candle
     # For cooldown, we'll set it to 10 candles after an exit:
-    cooldown_duration = 10 * candle_interval
+    cooldown_duration = 15 * candle_interval
 
     # Initialize TradeExecutor in mock mode.
     executor = TradeExecutor(mock_mode=True)
@@ -131,8 +132,8 @@ def simulate_trading(args):
         sig_val_1h = row_1h['signal_line']
 
         # Combine the signals.
-        combined_signal = combine_signals(signal_1h)
-
+        #combined_signal = combine_signals(signal_1h)
+        combined_signal = combine_signals(signal_15m, signal_1h)
         # Initialize flags/variables.
         trade_executed = "No"
         trade_qty = 0.0
