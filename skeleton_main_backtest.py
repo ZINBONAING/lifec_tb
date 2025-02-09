@@ -24,9 +24,6 @@ def combine_signals(signal_15m, signal_1h):
     else:
         return "HOLD"
 
-    
-
-
 def parse_symbol(symbol):
     """
     Parse the symbol to determine the base coin and quote coin.
@@ -50,8 +47,8 @@ def simulate_trading(args):
     interval_15m = "15m"
     interval_1h = "1h"
     candle_interval = timedelta(minutes=15)  # Duration of one candle
-    # For cooldown, we'll set it to 10 candles after an exit:
-    cooldown_duration = 15 * candle_interval
+    # Set cooldown duration to 10 candles.
+    cooldown_duration = 10 * candle_interval
 
     # Initialize TradeExecutor in mock mode.
     executor = TradeExecutor(mock_mode=True)
@@ -97,7 +94,7 @@ def simulate_trading(args):
     cooldown_until = None
 
     # Prepare the CSV file for logging trades.
-    # Added new columns: "trade_pnl", "trigger_reason", "watch_mode_entered", and "cooldown_active"
+    # CSV header includes profit_account among other fields.
     csv_file = "trades_log.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
@@ -108,7 +105,7 @@ def simulate_trading(args):
             "combined_signal", "symbol", "trade_quantity", "price", "order_type",
             "USDT_balance", f"{base_coin}_balance", "trade_executed",
             "position_action", "trade_pnl", "trigger_reason", 
-            "watch_mode_entered", "cooldown_active"
+            "watch_mode_entered", "cooldown_active", "profit_account"
         ])
 
     trades = []  # For storing trade details for summary reporting
@@ -132,8 +129,8 @@ def simulate_trading(args):
         sig_val_1h = row_1h['signal_line']
 
         # Combine the signals.
-        #combined_signal = combine_signals(signal_1h)
         combined_signal = combine_signals(signal_15m, signal_1h)
+
         # Initialize flags/variables.
         trade_executed = "No"
         trade_qty = 0.0
@@ -153,10 +150,10 @@ def simulate_trading(args):
         else:
             # Cooldown period has expired.
             cooldown_until = None
-            # If no active position and combined signal is BUY, then enter.
+            # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
             if pos_manager.current_position is None and combined_signal == "BUY":
                 available_usdt = current_bal["quote_balance"]
-                portfolio_value = available_usdt  # For backtest, all funds are initially in quote.
+                portfolio_value = available_usdt  # For backtest, all funds are in quote.
                 if available_usdt >= 0.1 * portfolio_value:
                     trade_qty = (0.99 * available_usdt) / current_price
                     trade_executed = "Yes"
@@ -165,17 +162,9 @@ def simulate_trading(args):
                     executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
                 else:
                     position_action = "Insufficient Funds for Entry"
-            # Additionally, if a position exists and the combined signal is SELL, exit using the signal.
-            #--oFF it for a while to enable SELL only profit. hehe 
-            #elif pos_manager.current_position is not None and combined_signal == "SELL":
-            #    pos_manager.exit_position(current_price, "SELL Signal", ts)
-            #    position_action = "Exited via SELL Signal"
-            #    cooldown_until = ts + cooldown_duration
-            # Otherwise, if a position is active, let the PositionManager monitor it.
-
+            # SELL EXIT: If a position exists and combined signal is SELL, exit (only if profitable).
             elif pos_manager.current_position is not None and combined_signal == "SELL":
                 entry_price = pos_manager.current_position["entry_price"]
-                # Only exit if you are in profit (current price > entry price)
                 if current_price > entry_price:
                     pos_manager.exit_position(current_price, "SELL Signal Profit Exit", ts)
                     position_action = "Exited via SELL Signal (Profit)"
@@ -183,6 +172,7 @@ def simulate_trading(args):
                 else:
                     position_action = "Sell Signal Ignored (Not in Profit)"
 
+        # If a position is active, let the PositionManager monitor it.
         if pos_manager.current_position is not None:
             pos_manager.monitor_position(current_price, open_price=open_price,
                                          high=float(row.get('high', current_price)),
@@ -209,7 +199,10 @@ def simulate_trading(args):
                 trade_pnl = last_closed.get("pnl", "")
                 trigger_reason = last_closed.get("reason", "")
 
-        # Log the current candle and position status.
+        # Get the current profit account value.
+        profit_account_value = pos_manager.profit_account
+
+        # Log the current candle and position status to CSV.
         current_bal = pos_manager.get_current_position()
         with open(csv_file, mode='a', newline='') as file:
             writer = csv.writer(file)
@@ -220,9 +213,11 @@ def simulate_trading(args):
                 combined_signal, symbol, trade_qty, current_price, "LIMIT",
                 current_bal["quote_balance"], current_bal["base_balance"],
                 trade_executed, position_action,
-                trade_pnl, trigger_reason, watch_mode_entered, cooldown_flag
+                trade_pnl, trigger_reason, watch_mode_entered, cooldown_flag,
+                profit_account_value
             ])
 
+        # Record trade if executed.
         if trade_executed == "Yes":
             trades.append({
                 "timestamp": ts,
@@ -233,6 +228,7 @@ def simulate_trading(args):
                 f"{base_coin}_balance": current_bal["base_balance"]
             })
 
+    # Final calculations.
     last_price = float(df_15m.iloc[-1]['close'])
     final_bal = pos_manager.get_current_position()
     portfolio_value = final_bal["quote_balance"] + (final_bal["base_balance"] * last_price)

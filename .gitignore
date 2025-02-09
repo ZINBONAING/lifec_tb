@@ -2,6 +2,7 @@
 *.csv
 release/
 *.ipynb
+*.txt
 config.json
 tradebot.log
 lifec_tb.code-workspace
