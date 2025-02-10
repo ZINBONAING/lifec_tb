@@ -58,6 +58,9 @@ class PositionManager:
         # Store the trading symbol (e.g., "BTCUSDT", "LTCUSDT")
         self.symbol = symbol
 
+         # New: Track the last exit price for reentry conditions.
+        self.last_exit_price: Optional[float] = None
+
     def enter_position(self, symbol: str, quantity: float, entry_price: float, reason: str):
         if self.current_position:
             logging.error("Attempted to enter a position while another is active.")
@@ -84,13 +87,12 @@ class PositionManager:
         entry_price = self.current_position["entry_price"]
 
         # Calculate fees (assuming a fee rate of 0.1% per trade side)
-        fee_rate = 0.001  # 0.1% fee
+        fee_rate = 0.001
         fees = (entry_price * quantity * fee_rate) + (exit_price * quantity * fee_rate)
         pnl = (exit_price - entry_price) * quantity - fees
 
         self.balance += pnl
 
-        # Prepare a closed position record.
         closed_position = {
             "symbol": self.current_position["symbol"],
             "quantity": quantity,
@@ -99,13 +101,10 @@ class PositionManager:
             "pnl": pnl,
             "reason": exit_reason,
             "timestamp": timestamp,
-            # Initialize profit details; these may remain 0 if no profit transfer occurs.
             "profit_taken": 0.0,
             "profit_taken_count": self.profit_taken_count
         }
 
-        # Profit Management:
-        # Define a target balance (initial_balance + 10% of initial_balance).
         target_balance = self.initial_balance * 1.10
         if self.balance > target_balance:
             profit_to_take = self.balance - target_balance
@@ -119,12 +118,16 @@ class PositionManager:
         self.position_log.append(closed_position)
         logging.info(f"Exited position: {closed_position}")
 
-        # Reset position-related attributes
+        # Record the exit price for reentry checks.
+        self.last_exit_price = exit_price
+
+        # Reset position-related attributes.
         self.current_position = None
         self.highest_price = None
         self.trailing_stop = None
         self.watch_mode = False
         self.watch_mode_entered = None
+
 
 
     def calculate_atr(self) -> Optional[float]:

@@ -148,21 +148,32 @@ def simulate_trading(args):
             position_action = "Cooldown Active"
             cooldown_flag = "Yes"
         else:
-            # Cooldown period has expired.
             cooldown_until = None
-            # POSITION ENTRY LOGIC: If no active position and combined signal is BUY.
-            if pos_manager.current_position is None and combined_signal == "BUY":
-                available_usdt = current_bal["quote_balance"]
-                portfolio_value = available_usdt  # For backtest, all funds are in quote.
-                if available_usdt >= 0.1 * portfolio_value:
-                    trade_qty = (0.99 * available_usdt) / current_price
-                    trade_executed = "Yes"
-                    position_action = "Entered"
-                    pos_manager.enter_position(symbol, trade_qty, current_price, reason="Signal BUY")
-                    executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
-                else:
-                    position_action = "Insufficient Funds for Entry"
-            # SELL EXIT: If a position exists and combined signal is SELL, exit (only if profitable).
+            if pos_manager.current_position is None:
+                # Reentry logic: if a last exit exists and current price is at least 10% lower than the exit price.
+                if pos_manager.last_exit_price is not None and current_price <= pos_manager.last_exit_price * 0.90:
+                    available_usdt = current_bal["quote_balance"]
+                    portfolio_value = available_usdt  # For backtest, all funds are in quote.
+                    if available_usdt >= 0.1 * portfolio_value:
+                        trade_qty = (0.99 * available_usdt) / current_price
+                        trade_executed = "Yes"
+                        position_action = "Re-entered due to 10% drop from exit"
+                        pos_manager.enter_position(symbol, trade_qty, current_price, reason="Re-entry: Price dropped 10% from last exit")
+                        executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
+                        # Reset the last exit price so this condition triggers only once.
+                        pos_manager.last_exit_price = None
+                # Normal entry based on combined BUY signal.
+                elif combined_signal == "BUY":
+                    available_usdt = current_bal["quote_balance"]
+                    portfolio_value = available_usdt
+                    if available_usdt >= 0.1 * portfolio_value:
+                        trade_qty = (0.99 * available_usdt) / current_price
+                        trade_executed = "Yes"
+                        position_action = "Entered"
+                        pos_manager.enter_position(symbol, trade_qty, current_price, reason="Signal BUY")
+                        executor.execute_trade("BUY", symbol, trade_qty, price=current_price)
+                    else:
+                        position_action = "Insufficient Funds for Entry"
             elif pos_manager.current_position is not None and combined_signal == "SELL":
                 entry_price = pos_manager.current_position["entry_price"]
                 if current_price > entry_price:
