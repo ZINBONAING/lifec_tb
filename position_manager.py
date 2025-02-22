@@ -271,12 +271,15 @@ class PositionManager:
                 quote_balance = 0.0
                 if quote_balance_info:
                     quote_balance = float(quote_balance_info.get('free', 0)) + float(quote_balance_info.get('locked', 0))
+                # Subtract our virtual profit account from the Binance quote balance.
+                adjusted_quote_balance = quote_balance - self.profit_account
+                logging.info(f"Raw Binance USDT: {quote_balance}, Profit account: {self.profit_account}, Adjusted USDT: {adjusted_quote_balance}")
                 return {
                     "symbol": self.symbol,
                     "base_asset": base_asset,
                     "base_balance": base_balance,
                     "quote_asset": quote_asset,
-                    "quote_balance": quote_balance
+                    "quote_balance": adjusted_quote_balance
                 }
             except BinanceAPIException as e:
                 logging.error(f"Binance API Exception: Code: {e.code}, Message: {e.message}")

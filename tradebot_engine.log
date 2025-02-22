@@ -90649,3 +90649,127 @@ dtype: float64
 2025-02-22 21:27:31 DEBUG: Calculated ATR: 0.8728571428571387
 2025-02-22 21:27:31 INFO: Backtest simulation completed.
 2025-02-22 21:27:31 INFO: Total Trades Executed: 193
+2025-02-22 21:29:14 INFO: Starting Unified Trading Engine in LIVE mode for LTCUSDT
+2025-02-22 21:29:14 DEBUG: Using proactor: IocpProactor
+2025-02-22 21:29:14 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:29:14 DEBUG: https://api.binance.com:443 "GET /api/v3/ping HTTP/1.1" 200 2
+2025-02-22 21:29:14 INFO: Entering live mode loop.
+2025-02-22 21:29:14 INFO: Live polling cycle started.
+2025-02-22 21:29:14 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:29:14 DEBUG: https://api.binance.com:443 "GET /api/v3/ticker/price?symbol=LTCUSDT HTTP/1.1" 200 43
+2025-02-22 21:29:14 DEBUG: Fetched live price: 127.71
+2025-02-22 21:29:14 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=15m&limit=1000&endTime=1740230954932 HTTP/1.1" 200 48882
+2025-02-22 21:29:15 DEBUG: Fetched 193 candles for interval 15m.
+2025-02-22 21:29:15 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=1h&limit=1000&endTime=1740230955060 HTTP/1.1" 200 50956
+2025-02-22 21:29:15 DEBUG: Fetched 49 candles for interval 1h.
+2025-02-22 21:29:15 DEBUG: MACD Calculation Complete: 188   -0.247874
+189   -0.228152
+190   -0.187764
+191   -0.165149
+192   -0.169480
+Name: close, dtype: float64
+2025-02-22 21:29:15 DEBUG: RSI Calculation Complete: 188    53.100159
+189    46.654611
+190    49.310345
+191    53.061224
+192    49.644128
+dtype: float64
+2025-02-22 21:29:15 INFO: Saved data with indicators to historical_data_with_indicators_15m.csv
+2025-02-22 21:29:15 DEBUG: MACD Calculation Complete: 44   -0.895109
+45   -0.918603
+46   -0.888252
+47   -0.839991
+48   -0.827707
+Name: close, dtype: float64
+2025-02-22 21:29:15 DEBUG: RSI Calculation Complete: 44    65.377358
+45    56.813187
+46    52.934132
+47    53.102625
+48    47.664671
+dtype: float64
+2025-02-22 21:29:15 INFO: Saved data with indicators to historical_data_with_indicators_1h.csv
+2025-02-22 21:29:15 INFO: Generated signals: {'MACD': {'15m': 'BUY', '1h': 'BUY'}, 'RSI': {'15m': 'Neutral', '1h': 'Neutral'}, 'Volume': {'15m': 'Low Volume', '1h': 'Low Volume'}}
+2025-02-22 21:29:15 INFO: Buy signals detected: [('MACD', '15m'), ('MACD', '1h')]
+2025-02-22 21:29:15 INFO: Live strategy action: BUY
+2025-02-22 21:29:15 INFO: Fetching balance for base asset: LTC and quote asset: USDT
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740230955206&signature=9b0847b50a290a39abad1a79dae754c4df47406c42a93eb4a13bd3377eb6bccd HTTP/1.1" 200 2863
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740230955286&signature=c4904cdd33f0fbc03a3d42ef2c5f9a1130c2b0fb4b0f6f621f2af54dc9d49e60 HTTP/1.1" 200 2863
+2025-02-22 21:29:15 INFO: Current account balance: {'symbol': 'LTCUSDT', 'base_asset': 'LTC', 'base_balance': 0.393884, 'quote_asset': 'USDT', 'quote_balance': 0.53491398}
+2025-02-22 21:29:15 INFO: Live Combined Signal triggered: BUY
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/exchangeInfo HTTP/1.1" 200 236566
+2025-02-22 21:29:15 DEBUG: Allowed decimals for LTCUSDT based on stepSize 0.001: 3
+2025-02-22 21:29:15 INFO: Executing Live BUY at 127.71: Raw qty = 0.004146620000000001, truncated to 0.004 using 3 decimals
+2025-02-22 21:29:15 INFO: Entered position: {'symbol': 'LTCUSDT', 'quantity': 0.004, 'entry_price': 127.71, 'entry_time': None, 'reason': 'Signal BUY'}
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "POST /api/v3/order HTTP/1.1" 400 47
+2025-02-22 21:29:15 ERROR: Binance API error: APIError(code=-1013): Filter failure: NOTIONAL
+2025-02-22 21:29:15 INFO: Trade response: {'status': 'ERROR', 'error': 'APIError(code=-1013): Filter failure: NOTIONAL'}
+2025-02-22 21:29:15 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:29:15 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=1m&limit=1 HTTP/1.1" 200 160
+2025-02-22 21:29:15 INFO: Live risk management - High: 127.77, Low: 127.69
+2025-02-22 21:29:15 DEBUG: Updated price history with High: 127.77, Low: 127.69, Close: 127.71
+2025-02-22 21:29:15 DEBUG: Not enough data to calculate ATR.
+2025-02-22 21:29:15 INFO: Fetching balance for base asset: LTC and quote asset: USDT
+2025-02-22 21:29:16 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740230955935&signature=732420b458f338828c703e3c4788048b5f8dace14fc39bc7614c3db758a57542 HTTP/1.1" 200 2863
+2025-02-22 21:29:16 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740230956018&signature=f84379927e674637cce83e5a07a232f56946197d77d35e8afc0516e321199760 HTTP/1.1" 200 2863
+2025-02-22 21:29:16 INFO: Live polling cycle completed. Sleeping until next cycle.
+2025-02-22 21:41:37 INFO: Starting Unified Trading Engine in LIVE mode for LTCUSDT
+2025-02-22 21:41:37 DEBUG: Using proactor: IocpProactor
+2025-02-22 21:41:37 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:41:37 DEBUG: https://api.binance.com:443 "GET /api/v3/ping HTTP/1.1" 200 2
+2025-02-22 21:41:37 INFO: Entering live mode loop.
+2025-02-22 21:41:37 INFO: Live polling cycle started.
+2025-02-22 21:41:37 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/ticker/price?symbol=LTCUSDT HTTP/1.1" 200 43
+2025-02-22 21:41:38 DEBUG: Fetched live price: 127.36
+2025-02-22 21:41:38 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=15m&limit=1000&endTime=1740231698075 HTTP/1.1" 200 48895
+2025-02-22 21:41:38 DEBUG: Fetched 193 candles for interval 15m.
+2025-02-22 21:41:38 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=1h&limit=1000&endTime=1740231698206 HTTP/1.1" 200 50954
+2025-02-22 21:41:38 DEBUG: Fetched 49 candles for interval 1h.
+2025-02-22 21:41:38 DEBUG: MACD Calculation Complete: 188   -0.228152
+189   -0.187764
+190   -0.165149
+191   -0.177457
+192   -0.205022
+Name: close, dtype: float64
+2025-02-22 21:41:38 DEBUG: RSI Calculation Complete: 188    46.654611
+189    49.310345
+190    53.061224
+191    48.776224
+192    41.758242
+dtype: float64
+2025-02-22 21:41:38 INFO: Saved data with indicators to historical_data_with_indicators_15m.csv
+2025-02-22 21:41:38 DEBUG: MACD Calculation Complete: 44   -0.895109
+45   -0.918603
+46   -0.888252
+47   -0.839991
+48   -0.855627
+Name: close, dtype: float64
+2025-02-22 21:41:38 DEBUG: RSI Calculation Complete: 44    65.377358
+45    56.813187
+46    52.934132
+47    53.102625
+48    45.747126
+dtype: float64
+2025-02-22 21:41:38 INFO: Saved data with indicators to historical_data_with_indicators_1h.csv
+2025-02-22 21:41:38 INFO: Generated signals: {'MACD': {'15m': 'BUY', '1h': 'SELL'}, 'RSI': {'15m': 'Neutral', '1h': 'Neutral'}, 'Volume': {'15m': 'High Volume', '1h': 'Low Volume'}}
+2025-02-22 21:41:38 INFO: Sell signals detected: [('MACD', '1h')]
+2025-02-22 21:41:38 INFO: Live strategy action: SELL
+2025-02-22 21:41:38 INFO: Fetching balance for base asset: LTC and quote asset: USDT
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740231698357&signature=efcde61ae01602fca6b1401de73f101ea47e13be85288ac62c39f0bf1cbc8670 HTTP/1.1" 200 2863
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740231698439&signature=2b299ef9a7fdc5539c7a4a9933fa8cb34e76b129af0298593f98d517801df665 HTTP/1.1" 200 2863
+2025-02-22 21:41:38 INFO: Raw Binance USDT: 0.53491398, Profit account: 0.0, Adjusted USDT: 0.53491398
+2025-02-22 21:41:38 INFO: Current account balance: {'symbol': 'LTCUSDT', 'base_asset': 'LTC', 'base_balance': 0.393884, 'quote_asset': 'USDT', 'quote_balance': 0.53491398}
+2025-02-22 21:41:38 INFO: Live Combined Signal triggered: SELL
+2025-02-22 21:41:38 INFO: No trade action executed in this cycle.
+2025-02-22 21:41:38 DEBUG: Starting new HTTPS connection (1): api.binance.com:443
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/klines?symbol=LTCUSDT&interval=1m&limit=1 HTTP/1.1" 200 160
+2025-02-22 21:41:38 INFO: Live risk management - High: 127.45, Low: 127.35
+2025-02-22 21:41:38 INFO: Fetching balance for base asset: LTC and quote asset: USDT
+2025-02-22 21:41:38 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740231698853&signature=884796e26bad15d3106c7119f543512881223e1fcbf1479a5f82724033b281e7 HTTP/1.1" 200 2863
+2025-02-22 21:41:39 DEBUG: https://api.binance.com:443 "GET /api/v3/account?recvWindow=10000&timestamp=1740231698937&signature=9bbbac9cca369f0d9ebcfa93986407ce88d7abee0032669ca4e66ba3425e4833 HTTP/1.1" 200 2863
+2025-02-22 21:41:39 INFO: Raw Binance USDT: 0.53491398, Profit account: 0.0, Adjusted USDT: 0.53491398
+2025-02-22 21:41:39 INFO: Live polling cycle completed. Sleeping until next cycle.
