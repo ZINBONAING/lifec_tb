@@ -94,9 +94,9 @@ class SignalManager:
     def generate_signals(self, historical_data_by_interval):
         """Generate trading signals for multiple timeframes."""
         signals = {
-            "MACD": {},
-            "RSI": {},
-            "Volume": {}
+            "MACD": {}
+            #"RSI": {},
+            #"Volume": {}
         }
 
         for interval, data in historical_data_by_interval.items():

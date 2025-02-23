@@ -122,58 +122,70 @@ def main():
     strategy_manager = StrategyManager()
 
     if args.mode == "backtest":
-        # Backtesting branch: iterate over historical 15m candles
+        # Backtesting branch: iterate over historical candles for each interval provided
         historical_data = {}
         for interval in args.intervals:
             df = market_data.fetch_historical_data(interval, args.days)
             if df.empty:
                 logging.error(f"No historical data fetched for interval {interval}. Exiting backtest.")
                 return
-            # Ensure a 'timestamp' column exists.
             if "timestamp" not in df.columns:
                 df["timestamp"] = pd.to_datetime(df["close_time"])
             df.sort_values(by="timestamp", inplace=True)
             historical_data[interval] = df
 
-        # Calculate and log indicators for debugging.
-        df_15m = historical_data["15m"]
-        macd_15m, signal_line_15m = signal_manager.calculate_macd(df_15m)
-        df_15m["macd"] = macd_15m
-        df_15m["signal_line"] = signal_line_15m
-        df_15m["trade_signal"] = df_15m.apply(lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
-        logging.info("15m Data (first 5 rows after indicator calculation):")
-        logging.info(df_15m.head())
-
-        df_1h = historical_data["1h"]
-        macd_1h, signal_line_1h = signal_manager.calculate_macd(df_1h)
-        df_1h["macd"] = macd_1h
-        df_1h["signal_line"] = signal_line_1h
-        df_1h["trade_signal"] = df_1h.apply(lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
-        logging.info("1h Data (first 5 rows after indicator calculation):")
-        logging.info(df_1h.head())
-
-        logging.info(f"Running backtest on {len(df_15m)} candles (15m timeframe).")
+        # Use the first interval in args.intervals as the simulation timeline.
+        timeline_interval = args.intervals[0]
+        df_timeline = historical_data[timeline_interval]
+        logging.info(f"Running backtest on {len(df_timeline)} candles ({timeline_interval} timeframe).")
         trades = []
         global PAST_SIGNALS
         PAST_SIGNALS = "HOLD"
 
-        for idx, row in df_15m.iterrows():
+        # Calculate indicators for each interval for debugging.
+        # For timeline interval:
+        macd_tl, signal_line_tl = signal_manager.calculate_macd(df_timeline)
+        df_timeline["macd"] = macd_tl
+        df_timeline["signal_line"] = signal_line_tl
+        df_timeline["trade_signal"] = df_timeline.apply(
+            lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
+        logging.info(f"{timeline_interval} Data (first 5 rows after indicator calculation):")
+        logging.info(df_timeline.head())
+
+        # Similarly, calculate indicators for the second interval if provided (optional)
+        if len(args.intervals) > 1:
+            second_interval = args.intervals[1]
+            df_second = historical_data[second_interval]
+            macd_sec, signal_line_sec = signal_manager.calculate_macd(df_second)
+            df_second["macd"] = macd_sec
+            df_second["signal_line"] = signal_line_sec
+            df_second["trade_signal"] = df_second.apply(
+                lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
+            logging.info(f"{second_interval} Data (first 5 rows after indicator calculation):")
+            logging.info(df_second.head())
+
+        # Backtest loop: iterate over each candle in the timeline interval
+        for idx, row in df_timeline.iterrows():
             ts = row["timestamp"]
             current_price = float(row["close"])
-            macd_val_15m = row.get("macd", None)
-            sig_val_15m = row.get("signal_line", None)
-            trade_signal_15m = row.get("trade_signal", None)
+            macd_val_tl = row.get("macd", None)
+            sig_val_tl = row.get("signal_line", None)
+            trade_signal_tl = row.get("trade_signal", None)
 
-            # Extract latest 1h candle for current simulation time
-            df_1h_current = historical_data["1h"][historical_data["1h"]["timestamp"] <= ts]
-            if not df_1h_current.empty:
-                latest_1h = df_1h_current.iloc[-1]
-                macd_val_1h = latest_1h.get("macd", None)
-                sig_val_1h = latest_1h.get("signal_line", None)
-                trade_signal_1h = latest_1h.get("trade_signal", None)
+            # Extract latest data from the second interval if provided
+            if len(args.intervals) > 1:
+                df_second_current = historical_data[second_interval][historical_data[second_interval]["timestamp"] <= ts]
+                if not df_second_current.empty:
+                    latest_second = df_second_current.iloc[-1]
+                    macd_val_sec = latest_second.get("macd", None)
+                    sig_val_sec = latest_second.get("signal_line", None)
+                    trade_signal_sec = latest_second.get("trade_signal", None)
+                else:
+                    macd_val_sec = sig_val_sec = trade_signal_sec = None
             else:
-                macd_val_1h = sig_val_1h = trade_signal_1h = None
+                macd_val_sec = sig_val_sec = trade_signal_sec = None
 
+            # Create a live window of data for current simulation time
             live_data = {}
             for interval, df in historical_data.items():
                 df_interval = df[df["timestamp"] <= ts]
@@ -187,10 +199,10 @@ def main():
 
             # Signal change logic: trigger only on a new MACD signal
             candidate_signal = "HOLD"
-            if ("15m" in signals.get("MACD", {})) and ("1h" in signals.get("MACD", {})):
-                if signals["MACD"]["15m"] == "BUY" and signals["MACD"]["1h"] == "BUY":
+            if ("MACD" in signals) and (timeline_interval in signals["MACD"]) and (len(args.intervals) > 1 and second_interval in signals["MACD"]):
+                if signals["MACD"][timeline_interval] == "BUY" and signals["MACD"][second_interval] == "BUY":
                     candidate_signal = "BUY"
-                elif signals["MACD"]["15m"] == "SELL" or signals["MACD"]["1h"] == "SELL":
+                elif signals["MACD"][timeline_interval] == "SELL" or signals["MACD"][second_interval] == "SELL":
                     candidate_signal = "SELL"
             if candidate_signal != PAST_SIGNALS and candidate_signal != "HOLD":
                 combined_signal = candidate_signal
@@ -199,6 +211,9 @@ def main():
             else:
                 combined_signal = "HOLD"
 
+            # (Rest of your trade execution logic goes here)
+            # ...
+            # For example:
             trade_executed = "No"
             trade_qty = 0.0
             position_action = "No Action"
@@ -251,8 +266,8 @@ def main():
 
             row_data = [
                 ts,
-                macd_val_15m, sig_val_15m, trade_signal_15m,
-                macd_val_1h, sig_val_1h, trade_signal_1h,
+                macd_val_tl, sig_val_tl, trade_signal_tl,
+                macd_val_sec, sig_val_sec, trade_signal_sec,
                 combined_signal,
                 args.pair, trade_qty, current_price, "LIMIT",
                 current_bal.get("quote_balance", 0), current_bal.get("base_balance", 0),
@@ -273,7 +288,7 @@ def main():
         logging.info("Backtest simulation completed.")
         logging.info(f"Total Trades Executed: {len(trades)}")
     else:
-        # Live mode branch with lot–size checking and additional debugging
+        # Live mode branch (similar modifications; using first interval from args.intervals as timeline if needed)
         polling_interval = 15 * 60  # 15 minutes in seconds (adjust as needed)
         logging.info("Entering live mode loop.")
         while True:
@@ -314,7 +329,6 @@ def main():
             account = position_manager.get_current_position()
             logging.info(f"Current account balance: {account}")
 
-            # Signal change logic (if desired)
             candidate_signal = "HOLD"
             if ("15m" in signals.get("MACD", {})) and ("1h" in signals.get("MACD", {})):
                 if signals["MACD"]["15m"] == "BUY" and signals["MACD"]["1h"] == "BUY":
@@ -332,7 +346,11 @@ def main():
                 available_usdt = account["quote_balance"]
                 if available_usdt > 0:
                     calculated_quantity = (0.99 * available_usdt) / current_price
-                    allowed_decimals = get_allowed_decimals(trade_executor, args.pair)
+                    allowed_decimals = 0
+                    if len(args.intervals) > 0:
+                        allowed_decimals = get_allowed_decimals(trade_executor, args.pair)
+                    else:
+                        allowed_decimals = 3
                     rounded_quantity = truncate(calculated_quantity, allowed_decimals)
                     trade_qty = rounded_quantity
                     position_action = "Entered"
@@ -366,7 +384,7 @@ def main():
             if high and low:
                 position_manager.monitor_position(
                     current_price,
-                    open_price=current_price,  # For live, using current price as open for simplicity
+                    open_price=current_price,
                     high=high,
                     low=low,
                     timestamp=pd.Timestamp.now()
@@ -378,8 +396,8 @@ def main():
             ts_live = pd.Timestamp.now()
             row_data = [
                 ts_live,
-                None, None, None,  # Optionally, include 15m indicator data if available
-                None, None, None,  # Optionally, include 1h indicator data if available
+                None, None, None,
+                None, None, None,
                 combined_signal,
                 args.pair, trade_qty, current_price, "LIMIT",
                 current_bal.get("quote_balance", 0), current_bal.get("base_balance", 0),
@@ -395,3 +413,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
