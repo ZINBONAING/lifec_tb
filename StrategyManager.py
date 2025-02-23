@@ -1,14 +1,9 @@
-# StrategyManager.py
-
 import logging
-# If TradeExecutor is not used directly, you might consider removing it:
-# from trade_executor import TradeExecutor
 
 class StrategyManager:
     def __init__(self, mock_mode=False):
-        # Remove TradeExecutor if it's not needed directly here.
-        # self.trade_executor = TradeExecutor(mock_mode=mock_mode)
-        self.current_action = "HOLD"  # Default action
+        self.current_action = "HOLD"  # Final action that will be used for trade execution
+        self.past_signal = "HOLD"     # Tracks the previous non-HOLD signal
 
     def aggregate_signals(self, signals):
         """
@@ -22,7 +17,6 @@ class StrategyManager:
         """
         buy_signals = []
         sell_signals = []
-
         for indicator, timeframes in signals.items():
             for interval, signal in timeframes.items():
                 if signal.upper() == "BUY":
@@ -33,28 +27,36 @@ class StrategyManager:
 
     def process_signals(self, signals):
         """
-        Process incoming signals and decide on an action.
+        Process incoming signals and decide on a final action.
+        This method aggregates the signals and then updates the final decision
+        only when a new non-HOLD signal is detected.
         
         Args:
             signals (dict): Dictionary containing signals from SignalManager.
         """
         buy_signals, sell_signals = self.aggregate_signals(signals)
-
-        # Decision Logic:
-        # Prioritize SELL signals over BUY signals.
+        candidate_signal = "HOLD"
+        
+        # Prioritize SELL over BUY if any exist.
         if sell_signals:
-            self.current_action = "SELL"
-            logging.info(f"Sell signals detected: {sell_signals}")
+            candidate_signal = "SELL"
         elif buy_signals:
-            self.current_action = "BUY"
-            logging.info(f"Buy signals detected: {buy_signals}")
+            candidate_signal = "BUY"
+        else:
+            candidate_signal = "HOLD"
+
+        # Update final decision only if a new non-HOLD signal is generated.
+        if candidate_signal != self.past_signal and candidate_signal != "HOLD":
+            self.current_action = candidate_signal
+            logging.info(f"StrategyManager: New signal triggered: {candidate_signal}")
+            self.past_signal = candidate_signal
         else:
             self.current_action = "HOLD"
-            logging.info("No actionable signals detected. Maintaining HOLD.")
+            logging.info("StrategyManager: No new signal triggered; maintaining HOLD.")
 
     def get_action(self):
         """
-        Retrieve the current action decided by the strategy.
+        Retrieve the final action decided by the strategy.
         
         Returns:
             str: "BUY", "SELL", or "HOLD".

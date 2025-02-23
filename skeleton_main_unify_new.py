@@ -6,46 +6,29 @@ import math
 import pandas as pd
 
 from MarketData import MarketData
-from trade_executor import TradeExecutor  # We'll use the module-level get_symbol_info function for lot size checks
+from trade_executor import TradeExecutor  # Module-level get_symbol_info will be used
 from position_manager import PositionManager
 from SignalManager4 import SignalManager
 from StrategyManager import StrategyManager
-
-# Global variable for signal change tracking (not used in main anymore)
-PAST_SIGNALS = "HOLD"
 
 def setup_logging():
     logging.basicConfig(
         level=logging.DEBUG,  # Use DEBUG for detailed logging
         format="%(asctime)s %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler("tradebot_engine.log"),
-            logging.StreamHandler()
-        ]
+        handlers=[logging.FileHandler("tradebot_engine.log"), logging.StreamHandler()]
     )
 
 def log_trade_activity(csv_file, row_data):
     """
     Append a row to the CSV trade log file.
-    row_data should be a list with the following fields:
-      [timestamp, macd_15m, signal_line_15m, trade_signal_15m,
-       macd_1h, signal_line_1h, trade_signal_1h,
-       combined_signal, symbol, trade_quantity, price, order_type,
-       USDT_balance, base_balance, trade_executed, position_action,
-       trade_pnl, trigger_reason, watch_mode_entered, cooldown_flag, profit_account]
     """
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(row_data)
 
 def get_allowed_decimals(trade_executor, symbol):
-    """
-    Retrieve the LOT_SIZE filter for the symbol using the module-level
-    get_symbol_info function from trade_executor, and compute allowed decimals.
-    If no symbol info is found, returns a default value (3).
-    """
-    from trade_executor import get_symbol_info  # Import the module-level function
+    from trade_executor import get_symbol_info
     symbol_info = get_symbol_info(symbol, trade_executor.client)
     if not symbol_info:
         logging.warning("Symbol info not found, defaulting allowed decimals to 3")
@@ -65,9 +48,6 @@ def get_allowed_decimals(trade_executor, symbol):
     return 3
 
 def truncate(number, decimals):
-    """
-    Truncate the given number to the specified number of decimal places.
-    """
     factor = 10 ** decimals
     return int(number * factor) / factor
 
@@ -84,45 +64,46 @@ def main():
                         help="Days of historical data for indicator calculations")
     parser.add_argument("--intervals", nargs="+", default=["15m", "1h"],
                         help="Candle intervals to use for signal generation")
+    parser.add_argument("--risk", choices=["on", "off"], default="on",
+                        help="Toggle risk management (trailing stop etc.)")
     args = parser.parse_args()
 
     setup_logging()
     logging.info(f"Starting Unified Trading Engine in {args.mode.upper()} mode for {args.pair}")
 
-    # Set up CSV log file based on mode
     csv_file = "backtest_trades_log.csv" if args.mode == "backtest" else "live_trades_log.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([
             "timestamp",
-            "macd_15m", "signal_line_15m", "trade_signal_15m",
-            "macd_1h", "signal_line_1h", "trade_signal_1h",
-            "combined_signal", "symbol", "trade_quantity", "price", "order_type",
+            "macd_1", "signal_line_1", "trade_signal_1",  # For timeline interval
+            "macd_2", "signal_line_2", "trade_signal_2",    # For second interval (if provided)
+            "final_action", "symbol", "trade_quantity", "price", "order_type",
             "USDT_balance", "base_balance", "trade_executed",
             "position_action", "trade_pnl", "trigger_reason",
             "watch_mode_entered", "cooldown_flag", "profit_account"
         ])
 
-    # Instantiate the unified market data interface
+    # Instantiate market data
     market_data = MarketData(args.pair, mode=args.mode)
 
     # Initialize TradeExecutor (mock_mode=True for backtest)
     trade_executor = TradeExecutor(mock_mode=(args.mode == "backtest"))
 
-    # Initialize PositionManager using the TradeExecutor's Binance Client
+    # Pass the risk toggle to PositionManager
+    use_risk = True if args.risk == "on" else False
     position_manager = PositionManager(
         initial_balance=args.initial_usdt,
         mode=args.mode,
         client=trade_executor.client,
-        symbol=args.pair
+        symbol=args.pair,
+        use_risk_management=use_risk
     )
 
-    # Initialize SignalManager and StrategyManager (common for both modes)
     signal_manager = SignalManager()
     strategy_manager = StrategyManager()
 
     if args.mode == "backtest":
-        # For backtesting, fetch historical data for each interval once.
         historical_data = {}
         for interval in args.intervals:
             df = market_data.fetch_historical_data(interval, args.days)
@@ -141,21 +122,21 @@ def main():
         trades = []
 
         # Calculate indicators for timeline interval.
-        macd_tl, signal_line_tl = signal_manager.calculate_macd(df_timeline)
-        df_timeline["macd"] = macd_tl
-        df_timeline["signal_line"] = signal_line_tl
+        macd_1, signal_line_1 = signal_manager.calculate_macd(df_timeline)
+        df_timeline["macd"] = macd_1
+        df_timeline["signal_line"] = signal_line_1
         df_timeline["trade_signal"] = df_timeline.apply(
             lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
         logging.info(f"{timeline_interval} Data (first 5 rows after indicator calculation):")
         logging.info(df_timeline.head())
 
-        # Optionally calculate for a second interval.
+        # Optionally for a second interval.
         if len(args.intervals) > 1:
             second_interval = args.intervals[1]
             df_second = historical_data[second_interval]
-            macd_sec, signal_line_sec = signal_manager.calculate_macd(df_second)
-            df_second["macd"] = macd_sec
-            df_second["signal_line"] = signal_line_sec
+            macd_2, signal_line_2 = signal_manager.calculate_macd(df_second)
+            df_second["macd"] = macd_2
+            df_second["signal_line"] = signal_line_2
             df_second["trade_signal"] = df_second.apply(
                 lambda row: "BUY" if row["macd"] > row["signal_line"] else "SELL", axis=1)
             logging.info(f"{second_interval} Data (first 5 rows after indicator calculation):")
@@ -163,42 +144,31 @@ def main():
         else:
             second_interval = None
 
-        # Backtest loop: iterate over each candle in the timeline interval.
         for idx, row in df_timeline.iterrows():
             ts = row["timestamp"]
             current_price = float(row["close"])
-            # For timeline interval
-            tl_macd = row.get("macd", None)
-            tl_signal = row.get("signal_line", None)
-            tl_trade_signal = row.get("trade_signal", None)
-
-            # Extract the latest data from the second interval (if provided)
+            signal1 = row.get("trade_signal", None)
             if second_interval:
-                df_second_current = historical_data[second_interval][historical_data[second_interval]["timestamp"] <= ts]
-                if not df_second_current.empty:
-                    latest_second = df_second_current.iloc[-1]
-                    sec_macd = latest_second.get("macd", None)
-                    sec_signal = latest_second.get("signal_line", None)
-                    sec_trade_signal = latest_second.get("trade_signal", None)
+                df_sec_current = historical_data[second_interval][historical_data[second_interval]["timestamp"] <= ts]
+                if not df_sec_current.empty:
+                    latest_sec = df_sec_current.iloc[-1]
+                    signal2 = latest_sec.get("trade_signal", None)
                 else:
-                    sec_macd = sec_signal = sec_trade_signal = None
+                    signal2 = None
             else:
-                sec_macd = sec_signal = sec_trade_signal = None
+                signal2 = None
 
-            # Create a live window of data for the current simulation time.
             live_data = {}
             for interval, df in historical_data.items():
                 df_interval = df[df["timestamp"] <= ts]
                 if not df_interval.empty:
                     live_data[interval] = df_interval
 
-            # Generate signals and let the StrategyManager decide.
             signals = signal_manager.generate_signals(live_data)
             strategy_manager.process_signals(signals)
-            action = strategy_manager.get_action()
-            logging.info(f"{ts} - Final Strategy action: {action}")
+            final_action = strategy_manager.get_action()
+            logging.info(f"{ts} - Final Strategy action: {final_action}")
 
-            # Trade execution logic based on the final decision from StrategyManager.
             trade_executed = "No"
             trade_qty = 0.0
             position_action = "No Action"
@@ -208,7 +178,7 @@ def main():
             cooldown_flag = ""
 
             account = position_manager.get_current_position()
-            if action == "BUY" and not position_manager.current_position:
+            if final_action == "BUY" and not position_manager.current_position:
                 available_usdt = account["quote_balance"]
                 if available_usdt > 0:
                     qty = (0.99 * available_usdt) / current_price
@@ -220,17 +190,25 @@ def main():
                     trade_executed = "Yes"
                 else:
                     position_action = "Insufficient Funds"
-            elif action == "SELL" and position_manager.current_position:
-                entry_price = position_manager.current_position["entry_price"]
-                if current_price > entry_price:
-                    position_action = "Exited via SELL Signal"
-                    logging.info(f"Backtest SELL at {current_price}")
+            elif final_action == "SELL" and position_manager.current_position:
+                # If risk management is enabled, exit immediately on SELL signal.
+                if position_manager.use_risk_management:
+                    logging.info("Risk management enabled: Executing SELL regardless of profit.")
                     qty = position_manager.current_position["quantity"]
                     position_manager.exit_position(current_price, "Signal SELL", timestamp=ts)
                     trade_executor.execute_trade("SELL", args.pair, qty, price=current_price)
                     trade_executed = "Yes"
                 else:
-                    position_action = "Sell Signal Ignored (Not in Profit)"
+                    entry_price = position_manager.current_position["entry_price"]
+                    if current_price > entry_price:
+                        position_action = "Exited via SELL Signal"
+                        logging.info(f"Backtest SELL at {current_price}")
+                        qty = position_manager.current_position["quantity"]
+                        position_manager.exit_position(current_price, "Signal SELL", timestamp=ts)
+                        trade_executor.execute_trade("SELL", args.pair, qty, price=current_price)
+                        trade_executed = "Yes"
+                    else:
+                        position_action = "Sell Signal Ignored (Not in Profit)"
 
             position_manager.monitor_position(
                 current_price,
@@ -251,9 +229,9 @@ def main():
 
             row_data = [
                 ts,
-                tl_macd, tl_signal, tl_trade_signal,
-                sec_macd, sec_signal, sec_trade_signal,
-                "N/A",  # Combined signal is now solely from StrategyManager
+                None, None, signal1,
+                None, None, signal2,
+                final_action,
                 args.pair, trade_qty, current_price, "LIMIT",
                 current_bal.get("quote_balance", 0), current_bal.get("base_balance", 0),
                 trade_executed, position_action,
@@ -264,7 +242,7 @@ def main():
             log_trade_activity(csv_file, row_data)
             trades.append({
                 "timestamp": ts,
-                "action": action,
+                "action": final_action,
                 "quantity": trade_qty,
                 "price": current_price,
                 "USDT_balance": current_bal.get("quote_balance", 0),
@@ -273,8 +251,8 @@ def main():
         logging.info("Backtest simulation completed.")
         logging.info(f"Total Trades Executed: {len(trades)}")
     else:
-        # Live mode branch: similar structure, using StrategyManager's final decision.
-        polling_interval = 15 * 60  # 15 minutes in seconds (adjust as needed)
+        # Live mode branch.
+        polling_interval = 15 * 60  # 15 minutes in seconds.
         logging.info("Entering live mode loop.")
         while True:
             logging.info("Live polling cycle started.")
@@ -300,8 +278,8 @@ def main():
             signals = signal_manager.generate_signals(live_data)
             logging.info(f"Generated signals: {signals}")
             strategy_manager.process_signals(signals)
-            action = strategy_manager.get_action()
-            logging.info(f"Live strategy action: {action}")
+            final_action = strategy_manager.get_action()
+            logging.info(f"Live strategy action: {final_action}")
 
             trade_executed = "No"
             trade_qty = 0.0
@@ -314,7 +292,7 @@ def main():
             account = position_manager.get_current_position()
             logging.info(f"Current account balance: {account}")
 
-            if action == "BUY" and not position_manager.current_position:
+            if final_action == "BUY" and not position_manager.current_position:
                 available_usdt = account["quote_balance"]
                 if available_usdt > 0:
                     calculated_quantity = (0.99 * available_usdt) / current_price
@@ -329,21 +307,26 @@ def main():
                     trade_executed = "Yes"
                 else:
                     position_action = "Insufficient Funds"
-            elif action == "SELL" and position_manager.current_position:
-                entry_price = position_manager.current_position["entry_price"]
-                if current_price > entry_price:
+            elif final_action == "SELL" and position_manager.current_position:
+                if position_manager.use_risk_management:
+                    logging.info("Risk management enabled: Executing SELL regardless of profit.")
                     qty = position_manager.current_position["quantity"]
-                    allowed_decimals = get_allowed_decimals(trade_executor, args.pair)
-                    rounded_quantity = truncate(qty, allowed_decimals)
-                    sell_price = round(current_price * 0.99, 2)
-                    position_action = "Exited via SELL Signal"
-                    logging.info(f"Executing Live SELL at {current_price}: Original qty = {qty}, truncated to {rounded_quantity} using {allowed_decimals} decimals; sell price = {sell_price}")
-                    position_manager.exit_position(sell_price, "Signal SELL", timestamp=pd.Timestamp.now())
-                    trade_response = trade_executor.execute_trade("SELL", args.pair, rounded_quantity, price=sell_price)
+                    position_manager.exit_position(current_price, "Signal SELL", timestamp=pd.Timestamp.now())
+                    trade_response = trade_executor.execute_trade("SELL", args.pair, qty, price=current_price)
                     logging.info(f"Trade response: {trade_response}")
                     trade_executed = "Yes"
                 else:
-                    position_action = "Sell Signal Ignored (Not in Profit)"
+                    entry_price = position_manager.current_position["entry_price"]
+                    if current_price > entry_price:
+                        position_action = "Exited via SELL Signal"
+                        logging.info(f"Executing Live SELL at {current_price}")
+                        qty = position_manager.current_position["quantity"]
+                        position_manager.exit_position(current_price, "Signal SELL", timestamp=pd.Timestamp.now())
+                        trade_response = trade_executor.execute_trade("SELL", args.pair, qty, price=current_price)
+                        logging.info(f"Trade response: {trade_response}")
+                        trade_executed = "Yes"
+                    else:
+                        position_action = "Sell Signal Ignored (Not in Profit)"
             else:
                 logging.info("No trade action executed in this cycle.")
 
@@ -364,9 +347,9 @@ def main():
             ts_live = pd.Timestamp.now()
             row_data = [
                 ts_live,
-                None, None, None,  # Optionally include interval indicator data if desired
+                None, None, None,  # Optionally include indicator data if available
                 None, None, None,
-                "N/A",  # Combined signal not logged separately here since StrategyManager returns final decision
+                final_action,
                 args.pair, trade_qty, current_price, "LIMIT",
                 current_bal.get("quote_balance", 0), current_bal.get("base_balance", 0),
                 trade_executed, position_action,
